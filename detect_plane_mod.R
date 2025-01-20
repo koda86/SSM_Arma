@@ -1,5 +1,11 @@
 remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier_ratio_threshold){
   
+  # Load required libraries inside the function
+  if(!requireNamespace("geometry", quietly = TRUE)) {
+    install.packages("geometry")
+  }
+  library(geometry)
+  
   # Define a function to compute the cross product of two 3D vectors
   cross_product <- function(u, v) {
     return(c(
@@ -9,7 +15,7 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
     ))
   }
   
-  # Corrected plane fitting function using the manual cross product
+  # Plane fitting function using the manual cross product
   fit_plane <- function(p1, p2, p3) {
     # Create vectors lying on the plane
     v1 <- p2 - p1
@@ -32,8 +38,9 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
     return(list(normal = normal, d = d))
   }
   
+  # Function to compute distances from points to a plane
   point_plane_distance <- function(points, plane) {
-    # Ensure 'points' is a data frame or matrix with columns X, Y, Z
+    # Ensure 'points' has columns X, Y, Z
     if (!all(c("X", "Y", "Z") %in% colnames(points))) {
       stop("points must have columns named 'X', 'Y', and 'Z'")
     }
@@ -50,11 +57,6 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
     
     # Convert points to matrix
     points_mat <- as.matrix(points[, c("X", "Y", "Z")])
-    
-    # Ensure 'points_mat' is N x 3
-    if (ncol(points_mat) != 3) {
-      stop("points matrix must have exactly 3 columns")
-    }
     
     # Extract normal and d
     normal <- plane$normal
@@ -75,41 +77,33 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
   max_angle_degrees <- 10
   max_angle_radians <- max_angle_degrees * (pi / 180)
   
-  # num_iterations <- 1000          # Number of iterations
-  # distance_threshold <- 1      # Adjust based on your data's scale
-  # inlier_ratio_threshold <- 0.5    # Minimum ratio of inliers to accept a plane
-  
   # Initialize variables to store the best plane
   best_plane <- NULL
   max_inliers <- 0
   best_inlier_indices <- NULL
   
-  set.seed(123)
+  set.seed(123)  # For reproducibility
   
-  ### **Identify Hull Points**
+  ### Identify Hull Points (added 20.01.2025)
   
-  # Option 1: Using Convex Hull
-  hull <- geometry::convhulln(point_cloud[, c("X", "Y", "Z")], options = "FA")
-  hull_indices <- unique(as.vector(hull))
+  # Compute the convex hull of the point cloud
+  hull <- convhulln(point_cloud[, c("X", "Y", "Z")], options = "FA")
   
-  # Option 2: Using Alpha Shape for Concave Hull (Uncomment if needed)
-  # alpha_val <- 1  # Adjust based on your data
-  # ashape <- ashape3d(point_cloud$X, point_cloud$Y, point_cloud$Z, alpha = alpha_val)
-  # hull_indices <- unique(ashape$hull_indices)  # Ensure this extracts hull point indices correctly
+  # Extract hull point indices correctly
+  hull_indices <- unique(as.vector(hull$hull))
   
   # Define non-hull points
   non_hull_indices <- setdiff(1:nrow(point_cloud), hull_indices)
-  
-  # If using alpha shape, ensure you have hull_indices defined appropriately
   
   # Check if there are non-hull points to process
   if(length(non_hull_indices) < 3){
     stop("Not enough non-hull points to perform plane fitting.")
   }
   
+  # RANSAC Loop to detect the best plane
   for (i in 1:num_iterations) {
-    # Randomly select 3 unique points
-    sample_indices <- sample(1:nrow(point_cloud), 3, replace = FALSE)
+    # Randomly select 3 unique non-hull points
+    sample_indices <- sample(non_hull_indices, 3, replace = FALSE)
     p1 <- as.numeric(point_cloud[sample_indices[1], c("X", "Y", "Z")])
     p2 <- as.numeric(point_cloud[sample_indices[2], c("X", "Y", "Z")])
     p3 <- as.numeric(point_cloud[sample_indices[3], c("X", "Y", "Z")])
@@ -122,12 +116,12 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
       next
     }
     
-    # Calculate distances of all points to the plane
-    distances <- point_plane_distance(point_cloud, plane)
+    # Calculate distances of all non-hull points to the plane
+    distances <- point_plane_distance(point_cloud[non_hull_indices, ], plane)
     
-    # Identify inliers
-    inlier_indices <- which(distances < distance_threshold)
-    num_inliers <- length(inlier_indices)
+    # Identify inliers among non-hull points
+    inlier_indices_non_hull <- which(distances < distance_threshold)
+    num_inliers <- length(inlier_indices_non_hull)
     
     # Compute angle between plane normal and vertical axis
     dot_product <- sum(plane$normal * vertical_axis)
@@ -142,11 +136,12 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
     if (num_inliers > max_inliers) {
       max_inliers <- num_inliers
       best_plane <- plane
-      best_inlier_indices <- inlier_indices
+      # Map inlier indices back to original point cloud indices
+      best_inlier_indices <- non_hull_indices[inlier_indices_non_hull]
     }
     
     # Early exit if a good enough plane is found
-    if ((max_inliers / nrow(point_cloud)) > inlier_ratio_threshold) {
+    if ((max_inliers / length(non_hull_indices)) > inlier_ratio_threshold) {
       break
     }
   }
@@ -155,15 +150,24 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
   if (!is.null(best_plane)) {
     cat("Plane detected with", max_inliers, "inliers out of", nrow(point_cloud), "points.\n")
     
-    # Extract inlier and outlier points
+    # Extract inlier and outlier points among non-hull points
     inliers <- point_cloud[best_inlier_indices, ]
-    outliers <- point_cloud[-best_inlier_indices, ]
+    outliers_non_hull <- point_cloud[setdiff(non_hull_indices, best_inlier_indices), ]
     
-    # Visualizing the detected plane
-    # plot3d(outliers$X, outliers$Y, outliers$Z, col = "blue", size = 1,
+    # **Integrate Hull Points Back**
+    hull_points <- point_cloud[hull_indices, ]
+    
+    # Combine outliers with hull points to form the cleaned point cloud
+    clean_point_cloud <- rbind(outliers_non_hull, hull_points)
+    
+    # Optionally, visualize the detected plane and hull
+    # Uncomment the following lines to visualize
+    # library(rgl)
+    # plot3d(outliers_non_hull$X, outliers_non_hull$Y, outliers_non_hull$Z, col = "blue", size = 1,
     #        main = "Plane Detection with RANSAC (Aligned with Vertical Axis)",
     #        xlab = "X", ylab = "Y", zlab = "Z")
     # points3d(inliers$X, inliers$Y, inliers$Z, col = "red", size = 3)
+    # points3d(hull_points$X, hull_points$Y, hull_points$Z, col = "green", size = 3)
     
     # Optionally, visualize the plane
     # Create a grid of points on the plane for visualization
@@ -181,33 +185,21 @@ remove_plane <- function(point_cloud, num_iterations, distance_threshold, inlier
     mesh_grid <- expand.grid(X = grid_x, Z = grid_z)
     
     # Calculate Y based on the plane equation: ax + by + cz + d = 0 => y = (-ax - cz - d)/b
-    mesh_grid$Y <- (-plane_normal[1] * mesh_grid$X - plane_normal[3] * mesh_grid$Z - plane_d) / plane_normal[2]
+    if (abs(plane_normal[2]) > 1e-6) {  # Avoid division by zero
+      mesh_grid$Y <- (-plane_normal[1] * mesh_grid$X - plane_normal[3] * mesh_grid$Z - plane_d) / plane_normal[2]
+      
+      # Plot the plane
+      # Uncomment the following line to visualize the plane
+      # surface3d(mesh_grid$X, mesh_grid$Z, mesh_grid$Y, color = "green", alpha = 0.5, front = "lines")
+    } else {
+      warning("Plane normal's Y component is too small; cannot plot the plane.")
+    }
     
-    # Plot the plane
-    # surface3d(mesh_grid$X, mesh_grid$Z, mesh_grid$Y, color = "green", alpha = 0.5, front = "lines")
-    
-    # Remove the detected plane from the point cloud
-    clean_point_cloud <- outliers
-    
-    # Visualize the cleaned point cloud
-    # rgl::plot3d(clean_point_cloud, col = "black", size = 3,
-    #             xlim = x_limits, ylim = y_limits, zlim = z_limits,
-    #             xlab = "X", ylab = "Y", zlab = "Z")
+    # Return the cleaned point cloud
+    return(clean_point_cloud)
     
   } else {
     cat("No plane detected aligned with the vertical axis.\n")
+    return(point_cloud)  # Return original point cloud if no plane is detected
   }
-  
-  return(clean_point_cloud)
 }
-
-
-
-
-
-
-
-
-
-
-
