@@ -1,3 +1,5 @@
+# TODO: Entfernung der Ebenen verbessern
+
 # Load packages
 library(Rvcg)
 library(reticulate)
@@ -9,6 +11,12 @@ library(dplyr)
 library(shapes)
 library(RANN)
 
+# Selbstgeschriebene Funktionen
+source("~/SSM_Arma/detect_plane_mod.R") # Detect the plane (using RANSAC) and remove it
+# source("~/SSM_Arma/detect_plane.R") # Alte Version ohne "Hüllenerkennung"
+# source("~/SSM_Arma/remove_plane.R")
+source("~/SSM_Arma/reconstruct_surface_reticulate.R") # Surface reconstruction
+
 # 1. Data import and visualization ---------------------------------------------
 
 # setwd("/run/user/1000/gvfs/smb-share:server=ex2100c.local,share=projektarchiv/Armasuisse/2014-12-11_Backup_AFS_Footscans/Armasuisse3D/konvertiert")
@@ -17,7 +25,7 @@ library(RANN)
 ply_dir <- "~/tmp/dummdata_armasuisse"
 ply_files <- list.files(ply_dir, pattern = "\\.ply$", full.names = TRUE)
 
-file <- ply_files[3] # 3 - mit Ebene, 10 - ohne Ebene im Fuß
+file <- ply_files[19] # Beispielfiles: 3 - mit Ebene, 10 - ohne Ebene im Fuß, 18 - viele Ebenen
 
 mesh <- Rvcg::vcgPlyRead(file)
 
@@ -39,37 +47,35 @@ rgl::plot3d(points_df, col = "blue", size = 3,
             xlim = x_limits, ylim = y_limits, zlim = z_limits,
             xlab = "X", ylab = "Y", zlab = "Z")
 
-# Detektionsfunktion schreiben um festzustellen, ob überhaupt eine Ebene im Fuß existiert
-# ...
+# Detektionsschema schreiben um festzustellen, ob überhaupt eine Ebene im Fuß existiert
+# Grundidee: Füße mit zusätzlichen Ebenen haben (deutlich) mehr Punkte ...
+number_points <- max(dim(mesh_cut$vb))
+cat(number_points)
 
-
-# If the plane exists ...
-# Detect the plane (using RANSAC) and remove it --------------------------------
-# source("~/SSM_Arma/detect_plane.R") # Alte Version ohne "Hüllenerkennung"
-source("~/SSM_Arma/detect_plane_mod.R")
-# source("~/SSM_Arma/remove_plane.R")
-
-# Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
-# clean_point_cloud <- remove_plane(points_df)
-points_df <- remove_plane(points_df,
-                          num_iterations = 1000, # Number of iterations
-                          distance_threshold = 5, # Adjust based on your data's scale
-                          inlier_ratio_threshold = 0.5 # Minimum ratio of inliers to accept a plane
-                          )
-clean_point_cloud <- points_df
-
-rgl::plot3d(clean_point_cloud, col = "black", size = 3,
-            xlim = x_limits, ylim = y_limits, zlim = z_limits,
-            xlab = "X", ylab = "Y", zlab = "Z")
-
-# Surface reconstruction --> am besten pauschal für alle Punktewolken
-source("~/SSM_Arma/reconstruct_surface_reticulate.R")
-reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
+threshold_planes_existance <- 8300
+if (number_points > threshold_planes_existance) {
+  # Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
+  # clean_point_cloud <- remove_plane(points_df)
+  points_df <- remove_plane(points_df,
+                            num_iterations = 1000, # Number of iterations
+                            distance_threshold = 5, # Adjust based on your data's scale
+                            inlier_ratio_threshold = 0.5 # Minimum ratio of inliers to accept a plane
+  )
+  clean_point_cloud <- points_df
+  
+  rgl::plot3d(clean_point_cloud, col = "black", size = 3,
+              xlim = x_limits, ylim = y_limits, zlim = z_limits,
+              xlab = "X", ylab = "Y", zlab = "Z")
+  
+  
+} else {
+  
+  reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
+}
 
 # Visualize the original and reconstructed meshes
 open3d()
 shade3d(reconstructed_mesh3d_object, color = "magenta", alpha = 0.7)
-
 
 #  Wenn nicht, das Mesh direkt resamplen
 # Downsample (Reduce Number of Vertices)
