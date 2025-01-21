@@ -52,7 +52,7 @@ rgl::plot3d(points_df, col = "blue", size = 3,
 number_points <- max(dim(mesh_cut$vb))
 cat(number_points)
 
-threshold_planes_existance <- 8300
+threshold_planes_existance <- 83000
 if (number_points > threshold_planes_existance) {
   # Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
   # clean_point_cloud <- remove_plane(points_df)
@@ -67,10 +67,9 @@ if (number_points > threshold_planes_existance) {
               xlim = x_limits, ylim = y_limits, zlim = z_limits,
               xlab = "X", ylab = "Y", zlab = "Z")
   
-  
-} else {
-  
   reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
+} else {
+  reconstructed_mesh3d_object <- reconstruct_poisson(points_df)
 }
 
 # Visualize the original and reconstructed meshes
@@ -79,8 +78,8 @@ shade3d(reconstructed_mesh3d_object, color = "magenta", alpha = 0.7)
 
 #  Wenn nicht, das Mesh direkt resamplen
 # Downsample (Reduce Number of Vertices)
-mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(mesh_cut,
-                                               voxelSize = 5,
+mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(reconstructed_mesh3d_object,
+                                               voxelSize = 5, # voxelSize = 0.06
                                                offset = 0,
                                                mergeClost = TRUE
 )
@@ -94,73 +93,50 @@ rgl::plot3d(points_df_downsampled, col = "blue", size = 3,
 
 
 
-
-# pcd <- rgl::as.mesh3d(clean_point_cloud)
-# resample_mesh <- vcgUniformRemesh(mesh, voxelSize = 0.06)
-
-# Advanced front surface reconstruction
-# package ‘RCGAL’ is not available for this version of R
-# https://www.r-bloggers.com/2022/01/surface-reconstruction-with-rcgal/
-# remotes::install_github(
-#   "stla/RCGAL", dependencies = TRUE, build_opts = "--no-multiarch"
-# )
-library(RCGAL)
-afs_mesh <- AFSreconstruction(SolidMobiusStrip_cloud)
-
-open3d(windowRect = c(50, 50, 562, 562))
-view3d(0, -50, zoom = 0.75)
-shade3d(afs_mesh, color = "darkred")
-
-
-# Export für Weiterverarbeitung in MeshLab -------------------------------------
-write_ply <- function(df, filename) {
-  n <- nrow(df)
-  header <- c(
-    "ply",
-    "format ascii 1.0",
-    paste("element vertex", n),
-    "property float x",
-    "property float y",
-    "property float z",
-    "end_header"
-  )
-  
-  # Write header
-  writeLines(header, con = filename)
-  
-  # Write vertex data
-  write.table(df, file = filename, append = TRUE, sep = " ", 
-              row.names = FALSE, col.names = FALSE)
-}
-
-# Replace 'clean_point_cloud' with your actual data frame name
-write_ply(clean_point_cloud, "~/tmp/clean_point_cloud.ply")
-
-#  Reimport reconstructed foot
-# Replace with your actual file path
-ply_file <- "~/tmp/reconstructed_foot.ply"
-
-# Read the PLY file
-mesh <- vcgImport(ply_file, updateNormals = TRUE)
-
-vertices <- mesh$vb[1:3, ] |> t() # Transpose to get Nx3 matrix
-
-# Convert to data frame for easier handling
-points_df <- data.frame(X = vertices[, 1], Y = vertices[, 2], Z = vertices[, 3])
-
-rgl::plot3d(points_df, col = "blue", size = 3,
-            xlim = x_limits, ylim = y_limits, zlim = z_limits,
-            xlab = "X", ylab = "Y", zlab = "Z")
+# Statistical Shape Analysis
 
 
 
+# # Advanced front surface reconstruction
+# # package ‘RCGAL’ is not available for this version of R
+# # https://www.r-bloggers.com/2022/01/surface-reconstruction-with-rcgal/
+# # remotes::install_github(
+# #   "stla/RCGAL", dependencies = TRUE, build_opts = "--no-multiarch"
+# # )
+# library(RCGAL)
+# afs_mesh <- AFSreconstruction(SolidMobiusStrip_cloud)
+# 
+# open3d(windowRect = c(50, 50, 562, 562))
+# view3d(0, -50, zoom = 0.75)
+# shade3d(afs_mesh, color = "darkred")
+# 
+# 
+# # Export für Weiterverarbeitung in MeshLab -------------------------------------
+# write_ply <- function(df, filename) {
+#   n <- nrow(df)
+#   header <- c(
+#     "ply",
+#     "format ascii 1.0",
+#     paste("element vertex", n),
+#     "property float x",
+#     "property float y",
+#     "property float z",
+#     "end_header"
+#   )
+#   
+#   # Write header
+#   writeLines(header, con = filename)
+#   
+#   # Write vertex data
+#   write.table(df, file = filename, append = TRUE, sep = " ", 
+#               row.names = FALSE, col.names = FALSE)
+# }
+# 
+# # Replace 'clean_point_cloud' with your actual data frame name
+# write_ply(clean_point_cloud, "~/tmp/clean_point_cloud.ply")
 
-# Downsample (Reduce Number of Vertices)
-mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(mesh_cut,
-                               voxelSize = 30,
-                               offset = 0,
-                               # mergeClost = TRUE
-)
+
+
 
 #  Alternativer Downsamplingansatz: **Downsampling the Mesh to a Specific Number of Vertices**
 # desired_vertices <- 1000  # Adjust this number as needed
