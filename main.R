@@ -1,5 +1,6 @@
 # Load packages
 library(Rvcg)
+library(reticulate)
 library(Morpho)
 library(rgl)
 library(geometry)
@@ -10,13 +11,13 @@ library(RANN)
 
 # 1. Data import and visualization ---------------------------------------------
 
-setwd("/run/user/1000/gvfs/smb-share:server=ex2100c.local,share=projektarchiv/Armasuisse/2014-12-11_Backup_AFS_Footscans/Armasuisse3D/konvertiert")
-ply_files <- list.files()
+# setwd("/run/user/1000/gvfs/smb-share:server=ex2100c.local,share=projektarchiv/Armasuisse/2014-12-11_Backup_AFS_Footscans/Armasuisse3D/konvertiert")
+# ply_files <- list.files()
 
 ply_dir <- "~/tmp/dummdata_armasuisse"
 ply_files <- list.files(ply_dir, pattern = "\\.ply$", full.names = TRUE)
 
-file <- ply_files[3]
+file <- ply_files[3] # 3 - mit Ebene, 10 - ohne Ebene im Fuß
 
 mesh <- Rvcg::vcgPlyRead(file)
 
@@ -38,9 +39,15 @@ rgl::plot3d(points_df, col = "blue", size = 3,
             xlim = x_limits, ylim = y_limits, zlim = z_limits,
             xlab = "X", ylab = "Y", zlab = "Z")
 
+# Detektionsfunktion schreiben um festzustellen, ob überhaupt eine Ebene im Fuß existiert
+# ...
+
+
+# If the plane exists ...
 # Detect the plane (using RANSAC) and remove it --------------------------------
 # source("~/SSM_Arma/detect_plane.R") # Alte Version ohne "Hüllenerkennung"
 source("~/SSM_Arma/detect_plane_mod.R")
+# source("~/SSM_Arma/remove_plane.R")
 
 # Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
 # clean_point_cloud <- remove_plane(points_df)
@@ -49,20 +56,95 @@ points_df <- remove_plane(points_df,
                           distance_threshold = 5, # Adjust based on your data's scale
                           inlier_ratio_threshold = 0.5 # Minimum ratio of inliers to accept a plane
                           )
-# points_df <- points_df
 clean_point_cloud <- points_df
 
 rgl::plot3d(clean_point_cloud, col = "black", size = 3,
             xlim = x_limits, ylim = y_limits, zlim = z_limits,
             xlab = "X", ylab = "Y", zlab = "Z")
 
+# Surface reconstruction --> am besten pauschal für alle Punktewolken
+source("~/SSM_Arma/reconstruct_surface_reticulate.R")
+reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
+
+# Visualize the original and reconstructed meshes
+open3d()
+shade3d(reconstructed_mesh3d_object, color = "magenta", alpha = 0.7)
+
+
+#  Wenn nicht, das Mesh direkt resamplen
+# Downsample (Reduce Number of Vertices)
+mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(mesh_cut,
+                                               voxelSize = 5,
+                                               offset = 0,
+                                               mergeClost = TRUE
+)
+
+vertices_downsampled <- mesh_cut_downsampled$vb[1:3, ] |> t()
+points_df_downsampled <- data.frame(X = vertices_downsampled[, 1], Y = vertices_downsampled[, 2], Z = vertices_downsampled[, 3])
+
+rgl::plot3d(points_df_downsampled, col = "blue", size = 3,
+            xlim = x_limits, ylim = y_limits, zlim = z_limits,
+            xlab = "X", ylab = "Y", zlab = "Z")
 
 
 
 
+# pcd <- rgl::as.mesh3d(clean_point_cloud)
+# resample_mesh <- vcgUniformRemesh(mesh, voxelSize = 0.06)
+
+# Advanced front surface reconstruction
+# package ‘RCGAL’ is not available for this version of R
+# https://www.r-bloggers.com/2022/01/surface-reconstruction-with-rcgal/
+# remotes::install_github(
+#   "stla/RCGAL", dependencies = TRUE, build_opts = "--no-multiarch"
+# )
+library(RCGAL)
+afs_mesh <- AFSreconstruction(SolidMobiusStrip_cloud)
+
+open3d(windowRect = c(50, 50, 562, 562))
+view3d(0, -50, zoom = 0.75)
+shade3d(afs_mesh, color = "darkred")
 
 
+# Export für Weiterverarbeitung in MeshLab -------------------------------------
+write_ply <- function(df, filename) {
+  n <- nrow(df)
+  header <- c(
+    "ply",
+    "format ascii 1.0",
+    paste("element vertex", n),
+    "property float x",
+    "property float y",
+    "property float z",
+    "end_header"
+  )
+  
+  # Write header
+  writeLines(header, con = filename)
+  
+  # Write vertex data
+  write.table(df, file = filename, append = TRUE, sep = " ", 
+              row.names = FALSE, col.names = FALSE)
+}
 
+# Replace 'clean_point_cloud' with your actual data frame name
+write_ply(clean_point_cloud, "~/tmp/clean_point_cloud.ply")
+
+#  Reimport reconstructed foot
+# Replace with your actual file path
+ply_file <- "~/tmp/reconstructed_foot.ply"
+
+# Read the PLY file
+mesh <- vcgImport(ply_file, updateNormals = TRUE)
+
+vertices <- mesh$vb[1:3, ] |> t() # Transpose to get Nx3 matrix
+
+# Convert to data frame for easier handling
+points_df <- data.frame(X = vertices[, 1], Y = vertices[, 2], Z = vertices[, 3])
+
+rgl::plot3d(points_df, col = "blue", size = 3,
+            xlim = x_limits, ylim = y_limits, zlim = z_limits,
+            xlab = "X", ylab = "Y", zlab = "Z")
 
 
 
