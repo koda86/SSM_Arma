@@ -1,6 +1,5 @@
 # TODO: Entfernung der Ebenen verbessern
 
-# Load packages
 library(Rvcg)
 library(reticulate)
 library(Morpho)
@@ -25,75 +24,79 @@ source("~/SSM_Arma/reconstruct_surface_reticulate.R") # Surface reconstruction
 ply_dir <- "~/tmp/dummdata_armasuisse"
 ply_files <- list.files(ply_dir, pattern = "\\.ply$", full.names = TRUE)
 
-file <- ply_files[19] # Beispielfiles: 3 - mit Ebene, 10 - ohne Ebene im Fuß, 18 - viele Ebenen
-
-mesh <- Rvcg::vcgPlyRead(file)
-
 v1 <- c(0, 150, 0) # Cutoff threshold
 norm <- c(0, 1, 0) # Normal plane
-mesh_cut <- Morpho::cutMeshPlane(mesh, v1, normal = norm, keep.upper = FALSE)
 
-vertices <- mesh_cut$vb[1:3, ] |> t() # Transpose to get Nx3 matrix
-
-# Convert to data frame for easier handling
-points_df <- data.frame(X = vertices[, 1], Y = vertices[, 2], Z = vertices[, 3])
-
-# Visualisierung
-x_limits <- c(-300, 300)
-y_limits <- c(-300, 300)
-z_limits <- c(-300, 300)
-
-rgl::plot3d(points_df, col = "blue", size = 3,
-            xlim = x_limits, ylim = y_limits, zlim = z_limits,
-            xlab = "X", ylab = "Y", zlab = "Z")
-
-# Detektionsschema schreiben um festzustellen, ob überhaupt eine Ebene im Fuß existiert
-# Grundidee: Füße mit zusätzlichen Ebenen haben (deutlich) mehr Punkte ...
-number_points <- max(dim(mesh_cut$vb))
-cat(number_points)
-
-threshold_planes_existance <- 83000
-if (number_points > threshold_planes_existance) {
-  # Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
-  # clean_point_cloud <- remove_plane(points_df)
-  points_df <- remove_plane(points_df,
-                            num_iterations = 1000, # Number of iterations
-                            distance_threshold = 5, # Adjust based on your data's scale
-                            inlier_ratio_threshold = 0.5 # Minimum ratio of inliers to accept a plane
-  )
-  clean_point_cloud <- points_df
+for (i in seq(ply_files)) {
+  file <- ply_files[i] # Beispielfiles: 2 - mit Ebene, 9 - ohne Ebene im Fuß, 17 - viele Ebenen
   
-  rgl::plot3d(clean_point_cloud, col = "black", size = 3,
+  mesh <- Rvcg::vcgPlyRead(file)
+  mesh_cut <- Morpho::cutMeshPlane(mesh, v1, normal = norm, keep.upper = FALSE)
+  
+  vertices <- mesh_cut$vb[1:3, ] |> t()
+  points_df <- data.frame(X = vertices[, 1], Y = vertices[, 2], Z = vertices[, 3])
+  
+  # Visualisierung
+  x_limits <- c(-300, 300)
+  y_limits <- c(-300, 300)
+  z_limits <- c(-300, 300)
+  
+  rgl::plot3d(points_df, col = "blue", size = 3,
               xlim = x_limits, ylim = y_limits, zlim = z_limits,
               xlab = "X", ylab = "Y", zlab = "Z")
   
-  reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
-} else {
-  reconstructed_mesh3d_object <- reconstruct_poisson(points_df)
+  # Detektionsschema schreiben um festzustellen, ob überhaupt eine Ebene im Fuß existiert
+  # Grundidee: Füße mit zusätzlichen Ebenen haben (deutlich) mehr Punkte ...
+  intersection_points <- identify_planes(point_cloud = points_df, distance_threshold = 0.4)
+  
+  # Visualize the identified (plane) intersection points
+  plot3d(point_cloud, col = "blue", size = 3, xlab = "X", ylab = "Y", zlab = "Z")
+  points3d(intersection_points, col = "green", size = 15) # Intersected points
+  
+  number_planes <- nrow(intersected_points) - 2 # - 2 weil es zwei "natürliche" Durchstoßpunkte gibt
+  
+  if (number_planes > 0) {
+    # Hier ne Schleife reinbauen die drüberläuft bis die 3 dünnen Ebenen weg sind. Anschließend: Outlier entfernen!
+    points_df <- remove_plane(points_df,
+                              num_iterations = 1000, # Number of iterations
+                              distance_threshold = 5, # Adjust based on your data's scale
+                              inlier_ratio_threshold = 0.5 # Minimum ratio of inliers to accept a plane
+    )
+    clean_point_cloud <- points_df
+    
+    rgl::plot3d(clean_point_cloud, col = "black", size = 3,
+                xlim = x_limits, ylim = y_limits, zlim = z_limits,
+                xlab = "X", ylab = "Y", zlab = "Z")
+    
+    reconstructed_mesh3d_object <- reconstruct_poisson(clean_point_cloud)
+  } else {
+    reconstructed_mesh3d_object <- reconstruct_poisson(points_df)
+  }
+  
+  # Visualize the original and reconstructed meshes
+  open3d()
+  shade3d(reconstructed_mesh3d_object, color = "magenta", alpha = 0.7)
+  
+  # Downsample (Reduce Number of Vertices)
+  mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(reconstructed_mesh3d_object,
+                                                 voxelSize = 5, # voxelSize = 0.06
+                                                 offset = 0,
+                                                 mergeClost = TRUE
+  )
+  
+  vertices_downsampled <- mesh_cut_downsampled$vb[1:3, ] |> t()
+  points_df_downsampled <- data.frame(X = vertices_downsampled[, 1], Y = vertices_downsampled[, 2], Z = vertices_downsampled[, 3])
+  
+  rgl::plot3d(points_df_downsampled, col = "blue", size = 3,
+              xlim = x_limits, ylim = y_limits, zlim = z_limits,
+              xlab = "X", ylab = "Y", zlab = "Z")
+  
+  
+  
+  # Statistical Shape Analysis
 }
 
-# Visualize the original and reconstructed meshes
-open3d()
-shade3d(reconstructed_mesh3d_object, color = "magenta", alpha = 0.7)
 
-#  Wenn nicht, das Mesh direkt resamplen
-# Downsample (Reduce Number of Vertices)
-mesh_cut_downsampled <- Rvcg::vcgUniformRemesh(reconstructed_mesh3d_object,
-                                               voxelSize = 5, # voxelSize = 0.06
-                                               offset = 0,
-                                               mergeClost = TRUE
-)
-
-vertices_downsampled <- mesh_cut_downsampled$vb[1:3, ] |> t()
-points_df_downsampled <- data.frame(X = vertices_downsampled[, 1], Y = vertices_downsampled[, 2], Z = vertices_downsampled[, 3])
-
-rgl::plot3d(points_df_downsampled, col = "blue", size = 3,
-            xlim = x_limits, ylim = y_limits, zlim = z_limits,
-            xlab = "X", ylab = "Y", zlab = "Z")
-
-
-
-# Statistical Shape Analysis
 
 
 
